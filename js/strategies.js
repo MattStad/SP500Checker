@@ -141,7 +141,13 @@
       const t = tickers[i];
       onProgress?.(i + 1, tickers.length, t);
       try {
-        const cboe = await API.getCboeChain(t);
+        let cboe;
+        try {
+          cboe = await API.getCboeChain(t);
+        } catch (firstErr) {
+          await new Promise(r => setTimeout(r, 400));
+          cboe = await API.getCboeChain(t); // ein Retry bei Proxy-Hickup
+        }
         const exp = pickExpiration(cboe.expirations, maxDte);
         if (!exp) { errors.push({ t, reason: "Keine Expiration im DTE-Range" }); continue; }
         const S = cboe.price;

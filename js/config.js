@@ -1,9 +1,27 @@
 window.CFG = {
+  // Reihenfolge nach Zuverlässigkeit. corsproxy.io ist aktuell am schnellsten.
+  // extract: manche Proxies (allorigins/get) verpacken die Antwort in JSON.
   CORS_PROXIES: [
-    (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-    (url) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
-    (url) => `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(url)}`,
+    {
+      build: (url) => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
+      extract: (text) => text,
+    },
+    {
+      build: (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+      extract: (text) => text,
+    },
+    {
+      build: (url) => `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
+      extract: (text) => {
+        try { return JSON.parse(text).contents ?? text; } catch { return text; }
+      },
+    },
+    {
+      build: (url) => `https://api.codetabs.com/v1/proxy/?quest=${url}`,
+      extract: (text) => text,
+    },
   ],
+  PROXY_TIMEOUT_MS: 12_000,
   RISK_FREE_RATE: 0.045,
   SCAN_TICKERS: [
     "AAPL","MSFT","NVDA","AMZN","GOOGL","META","TSLA","BRK-B","JPM","V",

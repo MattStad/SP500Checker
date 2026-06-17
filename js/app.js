@@ -236,16 +236,19 @@
     `;
   }
 
-  async function loadChart({ silent = false } = {}) {
+  async function loadChart({ silent = false, retry = 1 } = {}) {
     setStamp("chart-stamp", true);
     const cached = loadCachedChart();
     if (cached) {
       try { renderChartFromCache(cached); } catch {}
     }
+    const tickerAtStart = state.ticker, rangeAtStart = state.range;
     try {
       const fetchRange = RANGE_FETCH[state.range] || state.range;
       const interval = state.range === "5d" ? "30m" : "1d";
       const { meta, points: fullPoints } = await API.getChart(state.ticker, fetchRange, interval);
+      // Falls User in der Zwischenzeit gewechselt hat → verwerfen
+      if (state.ticker !== tickerAtStart || state.range !== rangeAtStart) return;
       const { points, pre, fullCloses } = computeIndicatorsSliced(fullPoints, RANGE_DISPLAY_COUNT[state.range]);
       state.lastRender = { meta, points, pre };
       CHARTS.render("price-chart", points, state.ticker, state.indicators, pre);
@@ -253,8 +256,13 @@
       saveCachedChart(state.ticker, state.range, meta, points, pre, fullCloses.length);
       setStamp("chart-stamp", false);
     } catch (e) {
-      if (!silent && !state.lastRender) $("chart-sub").textContent = "Fehler: " + e.message;
       console.warn("Chart error", e);
+      if (retry > 0 && state.ticker === tickerAtStart && state.range === rangeAtStart) {
+        setStamp("chart-stamp", false);
+        setTimeout(() => loadChart({ silent, retry: retry - 1 }), 1200);
+        return;
+      }
+      if (!silent && !state.lastRender) $("chart-sub").textContent = "Daten gerade nicht abrufbar — neuer Versuch in 60s.";
       setStamp("chart-stamp", false);
     }
   }
@@ -328,7 +336,10 @@
       } else if (ok === 0 && errCount > 0) {
         status.className = "scan-status error";
         const sampleErr = errors[0]?.reason || "unbekannt";
-        status.textContent = `Optionsdaten nicht abrufbar (0/${total} OK). Beispiel-Fehler: ${sampleErr}. Yahoo Optionen-Endpoint evtl. blockiert.`;
+        const hint = /HTTP|Proxy|fehlgeschlagen/i.test(sampleErr)
+          ? " CORS-Proxy gerade überlastet — bitte nochmal scannen."
+          : "";
+        status.textContent = `Optionsdaten gerade nicht abrufbar (0/${total} OK). Beispiel: ${sampleErr}.${hint}`;
       } else {
         status.className = "scan-status";
         status.textContent = `${ok}/${total} Ticker gescannt, keine handelbaren Setups gefunden.`;

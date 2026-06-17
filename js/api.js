@@ -3,31 +3,51 @@
   const Y_OPTIONS = "https://query2.finance.yahoo.com/v7/finance/options";
   const RSS2JSON = "https://api.rss2json.com/v1/api.json";
 
-  async function fetchViaProxy(url) {
-    let lastErr;
-    for (const proxify of CFG.CORS_PROXIES) {
-      try {
-        const res = await fetch(proxify(url), { cache: "no-store" });
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        const text = await res.text();
-        try { return JSON.parse(text); } catch { return text; }
-      } catch (e) { lastErr = e; }
+  // Merkt sich den zuletzt funktionierenden Proxy → wird beim nächsten Mal zuerst probiert
+  let bestProxyIdx = 0;
+
+  async function fetchWithTimeout(url, ms) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), ms);
+    try {
+      return await fetch(url, { cache: "no-store", signal: ctrl.signal });
+    } finally {
+      clearTimeout(timer);
     }
-    throw lastErr || new Error("All proxies failed");
+  }
+
+  // Probiert Proxies in Reihenfolge, beginnend beim zuletzt erfolgreichen.
+  // Gibt den extrahierten Text zurück. Bei Timeout/Fehler → nächster Proxy.
+  async function fetchRawViaProxy(url) {
+    const proxies = CFG.CORS_PROXIES;
+    const order = [bestProxyIdx, ...proxies.map((_, i) => i).filter(i => i !== bestProxyIdx)];
+    let lastErr;
+    for (const idx of order) {
+      const proxy = proxies[idx];
+      try {
+        const res = await fetchWithTimeout(proxy.build(url), CFG.PROXY_TIMEOUT_MS);
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const raw = await res.text();
+        const text = proxy.extract(raw);
+        if (!text || text.length < 10) throw new Error("Leere Antwort");
+        bestProxyIdx = idx; // dieser Proxy klappt → nächstes Mal zuerst
+        return text;
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    throw lastErr || new Error("Alle Proxies fehlgeschlagen");
+  }
+
+  async function fetchViaProxy(url) {
+    const text = await fetchRawViaProxy(url);
+    try { return JSON.parse(text); } catch { return text; }
   }
 
   async function fetchTextViaProxy(url) {
-    let lastErr;
-    for (const proxify of CFG.CORS_PROXIES) {
-      try {
-        const res = await fetch(proxify(url), { cache: "no-store" });
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        const text = await res.text();
-        if (!text || text.length < 30) throw new Error("Leere Antwort");
-        return text;
-      } catch (e) { lastErr = e; }
-    }
-    throw lastErr || new Error("All proxies failed");
+    const text = await fetchRawViaProxy(url);
+    if (text.length < 30) throw new Error("Leere Antwort");
+    return text;
   }
 
   async function getChartRaw(symbol, range = "1mo", interval = "1d") {
