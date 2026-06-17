@@ -21,6 +21,7 @@
     indicators: { sma20: true, sma50: true, bollinger: true },
     lastRender: null,
     lastMovers: [],
+    lastQuotes: [],
   };
 
   const $ = (id) => document.getElementById(id);
@@ -124,8 +125,14 @@
     setStamp("movers-stamp", true);
     if (!silent && !list.querySelector(".mover-row")) list.innerHTML = "Lade…";
     try {
-      const quotes = await API.getQuotes(CFG.SCAN_TICKERS);
-      if (!quotes.length) throw new Error("Keine Quotes erhalten");
+      let quotes = await API.getQuotes(CFG.SCAN_TICKERS);
+      // Bei (teilweisem) Proxy-Ausfall: letzten guten Stand wiederverwenden statt Fehler
+      if (quotes.length < 5 && state.lastQuotes.length) {
+        quotes = state.lastQuotes;
+      } else if (quotes.length >= 5) {
+        state.lastQuotes = quotes;
+      }
+      if (!quotes.length) throw new Error("Keine Quotes erhalten (Proxy evtl. überlastet)");
       let sorted = quotes.filter(q => q.regularMarketPrice != null);
       if (kind === "gainers") sorted.sort((a, b) => (b.regularMarketChangePercent || 0) - (a.regularMarketChangePercent || 0));
       else if (kind === "losers") sorted.sort((a, b) => (a.regularMarketChangePercent || 0) - (b.regularMarketChangePercent || 0));
@@ -148,8 +155,11 @@
       setStamp("movers-stamp", false);
       prefetchMoverCharts(sorted.slice(0, 6));
     } catch (e) {
-      if (!silent) list.innerHTML = `<div class="news-item">Fehler beim Laden: ${e.message}</div>`;
       console.warn("Movers error", e);
+      // Letzten guten Stand behalten falls vorhanden
+      if (!list.querySelector(".mover-row") && !silent) {
+        list.innerHTML = `<div class="news-item">Daten gerade nicht abrufbar (${e.message}). Nächster Versuch in 60s.</div>`;
+      }
       setStamp("movers-stamp", false);
     }
   }
@@ -300,7 +310,7 @@
     const strategies = sel === "all" ? ["csp", "cc", "bps", "lc"] : [sel];
 
     try {
-      const tickers = CFG.SCAN_TICKERS.slice(0, 25);
+      const tickers = CFG.SCAN_TICKERS.slice(0, 18);
       const { results, fallback, errors, ok, total } = await STRAT.scan({
         tickers, strategies, minPop, maxDte,
         onProgress: (i, n, t) => { status.textContent = `Scanne ${i}/${n}: ${t}`; },

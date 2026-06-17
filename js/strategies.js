@@ -141,14 +141,13 @@
       const t = tickers[i];
       onProgress?.(i + 1, tickers.length, t);
       try {
-        const meta = await API.getOptionExpirations(t);
-        const exp = pickExpiration(meta.expirations, maxDte);
+        const cboe = await API.getCboeChain(t);
+        const exp = pickExpiration(cboe.expirations, maxDte);
         if (!exp) { errors.push({ t, reason: "Keine Expiration im DTE-Range" }); continue; }
-        const chainRes = await API.getOptionChain(t, exp);
-        const S = chainRes.underlying?.regularMarketPrice;
+        const S = cboe.price;
         if (!S) { errors.push({ t, reason: "Kein Underlying-Preis" }); continue; }
         const dte = dteFrom(exp);
-        const chain = chainRes.chain || {};
+        const chain = cboe.byExp.get(exp) || {};
         const calls = (chain.calls || []).filter(c => c.bid > 0 || c.ask > 0);
         const puts = (chain.puts || []).filter(p => p.bid > 0 || p.ask > 0);
 

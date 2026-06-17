@@ -60,7 +60,9 @@
           const r = await getChartRaw(s, "5d", "1d");
           const m = r.meta || {};
           const price = m.regularMarketPrice;
-          const prev = m.chartPreviousClose ?? m.previousClose;
+          // previousClose = gestriger Schluss (korrekt für Tagesänderung);
+          // chartPreviousClose = Schluss VOR dem 5T-Fenster (falsch für Tagesänderung)
+          const prev = m.previousClose ?? m.chartPreviousClose;
           if (price == null) return null;
           return {
             symbol: m.symbol || s,
@@ -78,6 +80,55 @@
       out.push(...results.filter(Boolean));
     }
     return out;
+  }
+
+  // ---- CBOE: kostenlose verzögerte Optionsdaten (IV + Greeks, kein Key) ----
+  const CBOE = "https://cdn.cboe.com/api/global/delayed_quotes/options/";
+
+  function parseOcc(sym) {
+    // z.B. AAPL260617C00230000 → root, exp(unix), type, strike
+    const strike = parseInt(sym.slice(-8), 10) / 1000;
+    const type = sym.slice(-9, -8) === "C" ? "call" : "put";
+    const ds = sym.slice(-15, -9); // YYMMDD
+    const yy = 2000 + parseInt(ds.slice(0, 2), 10);
+    const mm = parseInt(ds.slice(2, 4), 10);
+    const dd = parseInt(ds.slice(4, 6), 10);
+    const exp = Math.floor(Date.UTC(yy, mm - 1, dd, 20, 0, 0) / 1000);
+    return { type, strike, exp };
+  }
+
+  function cboeSymbol(symbol) {
+    // CBOE nutzt keine Bindestriche (BRK-B → BRKB)
+    return symbol.replace(/[-.]/g, "");
+  }
+
+  async function getCboeChain(symbol) {
+    const url = CBOE + encodeURIComponent(cboeSymbol(symbol)) + ".json";
+    const data = await fetchViaProxy(url);
+    const d = data?.data;
+    if (!d || !Array.isArray(d.options)) throw new Error("Keine CBOE-Daten für " + symbol);
+    const price = d.current_price ?? d.close ?? d.prev_day_close;
+    if (price == null) throw new Error("Kein Preis für " + symbol);
+
+    const byExp = new Map();
+    for (const o of d.options) {
+      const p = parseOcc(o.option);
+      if (!byExp.has(p.exp)) byExp.set(p.exp, { calls: [], puts: [] });
+      const leg = {
+        strike: p.strike,
+        bid: o.bid || 0,
+        ask: o.ask || 0,
+        lastPrice: o.last_trade_price || 0,
+        impliedVolatility: o.iv || 0,
+        volume: o.volume || 0,
+        openInterest: o.open_interest || 0,
+        delta: o.delta, gamma: o.gamma, theta: o.theta, vega: o.vega,
+        expiration: p.exp,
+      };
+      byExp.get(p.exp)[p.type === "call" ? "calls" : "puts"].push(leg);
+    }
+    const expirations = Array.from(byExp.keys()).sort((a, b) => a - b);
+    return { price, expirations, byExp };
   }
 
   async function getOptionExpirations(symbol) {
@@ -148,5 +199,5 @@
     }
   }
 
-  window.API = { getQuotes, getChart, getChartRaw, getOptionExpirations, getOptionChain, getNews };
+  window.API = { getQuotes, getChart, getChartRaw, getOptionExpirations, getOptionChain, getCboeChain, getNews };
 })();
