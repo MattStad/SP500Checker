@@ -7,7 +7,7 @@
     scan:   900_000,
   };
   const SCAN_INITIAL_DELAY = 3_000;
-  const CHART_CACHE_PREFIX = "sp500cache:chart:";
+  const CHART_CACHE_PREFIX = "sp500cache:v2:chart:";
 
   const RANGE_FETCH = { "5d": "1mo", "1mo": "6mo", "3mo": "1y", "6mo": "2y", "1y": "2y" };
   const RANGE_DISPLAY_COUNT = { "5d": null, "1mo": 22, "3mo": 66, "6mo": 132, "1y": 252 };
@@ -189,7 +189,8 @@
   function updateChartHeaderAndMetrics(meta, points, pre, fullCloses) {
     $("chart-title").textContent = state.ticker;
     const price = meta.regularMarketPrice;
-    const prev = meta.chartPreviousClose || meta.previousClose;
+    // Tagesänderung (gestriger Schluss), nicht die Änderung über den Hol-Zeitraum
+    const prev = meta.previousClose || meta.chartPreviousClose;
     const chg = price - prev;
     const chgPct = chg / prev;
     const cls = chg >= 0 ? "up" : "down";
