@@ -59,10 +59,10 @@
       return obj;
     } catch { return null; }
   }
-  function saveCachedChart(sym, range, meta, points, pre, fullClosesLen) {
+  function saveCachedChart(sym, range, meta, points, pre, fullCloses) {
     try {
       localStorage.setItem(cacheChartKey(sym, range), JSON.stringify({
-        ts: Date.now(), meta, pre, fullClosesLen,
+        ts: Date.now(), meta, pre, fullCloses,
         points: points.map(p => ({ ...p, t: p.t.toISOString() })),
       }));
     } catch {}
@@ -172,7 +172,7 @@
       try {
         const { meta, points: fullPoints } = await API.getChart(m.symbol, RANGE_FETCH["1mo"], "1d");
         const { points, pre, fullCloses } = computeIndicatorsSliced(fullPoints, RANGE_DISPLAY_COUNT["1mo"]);
-        saveCachedChart(m.symbol, "1mo", meta, points, pre, fullCloses.length);
+        saveCachedChart(m.symbol, "1mo", meta, points, pre, fullCloses);
       } catch (e) {
         console.debug("Prefetch fehlgeschlagen", m.symbol);
       }
@@ -181,12 +181,12 @@
   }
 
   function renderChartFromCache(cached) {
-    state.lastRender = { meta: cached.meta, points: cached.points, pre: cached.pre };
+    state.lastRender = { meta: cached.meta, points: cached.points, pre: cached.pre, fullCloses: cached.fullCloses };
     CHARTS.render("price-chart", cached.points, state.ticker, state.indicators, cached.pre);
-    updateChartHeaderAndMetrics(cached.meta, cached.points, cached.pre);
+    updateChartHeaderAndMetrics(cached.meta, cached.points, cached.pre, cached.fullCloses);
   }
 
-  function updateChartHeaderAndMetrics(meta, points, pre) {
+  function updateChartHeaderAndMetrics(meta, points, pre, fullCloses) {
     $("chart-title").textContent = state.ticker;
     const price = meta.regularMarketPrice;
     const prev = meta.chartPreviousClose || meta.previousClose;
@@ -196,6 +196,8 @@
     $("chart-sub").innerHTML = `$${fmt(price)} <span class="${cls}">${chg >= 0 ? "+" : ""}${fmt(chg)} (${fmtSignedPct(chgPct)})</span>`;
 
     const closes = points.map(p => p.c);
+    // Indikatoren wie RSI/MACD brauchen die VOLLE Serie, nicht nur das Anzeige-Fenster
+    const series = (fullCloses && fullCloses.length >= closes.length) ? fullCloses : closes;
     const high = Math.max(...points.map(p => p.h));
     const low = Math.min(...points.map(p => p.l));
     const vol = points[points.length - 1]?.v;
@@ -205,7 +207,7 @@
     const variance = returns.reduce((a, b) => a + (b - mean) ** 2, 0) / Math.max(1, returns.length - 1);
     const hv = Math.sqrt(variance * 252);
 
-    const rsiVals = IND.rsi(closes, 14);
+    const rsiVals = IND.rsi(series, 14);
     const rsi = rsiVals[rsiVals.length - 1];
     const rsiCls = rsi == null ? "neutral" : (rsi < 30 ? "oversold" : rsi > 70 ? "overbought" : "neutral");
     const rsiLabel = rsi == null ? "—" : (rsi < 30 ? "Oversold" : rsi > 70 ? "Overbought" : "Neutral");
@@ -219,9 +221,9 @@
       else trend = "↔ Mixed";
     }
 
-    const macdRes = IND.macd(closes);
+    const macdRes = IND.macd(series);
     const macdHist = macdRes.hist[macdRes.hist.length - 1];
-    const macdSignal = macdHist == null ? "—" : (macdHist > 0 ? "↑ Bullish" : "↓ Bearish");
+    const macdSignal = macdHist == null ? "—" : (macdHist > 0 ? `↑ Bullish (${macdHist.toFixed(2)})` : `↓ Bearish (${macdHist.toFixed(2)})`);
 
     $("ticker-metrics").innerHTML = `
       <div class="metric-cell"><span class="k">Periode Hoch</span><span class="v">$${fmt(high)}</span></div>
@@ -250,10 +252,10 @@
       // Falls User in der Zwischenzeit gewechselt hat → verwerfen
       if (state.ticker !== tickerAtStart || state.range !== rangeAtStart) return;
       const { points, pre, fullCloses } = computeIndicatorsSliced(fullPoints, RANGE_DISPLAY_COUNT[state.range]);
-      state.lastRender = { meta, points, pre };
+      state.lastRender = { meta, points, pre, fullCloses };
       CHARTS.render("price-chart", points, state.ticker, state.indicators, pre);
-      updateChartHeaderAndMetrics(meta, points, pre);
-      saveCachedChart(state.ticker, state.range, meta, points, pre, fullCloses.length);
+      updateChartHeaderAndMetrics(meta, points, pre, fullCloses);
+      saveCachedChart(state.ticker, state.range, meta, points, pre, fullCloses);
       setStamp("chart-stamp", false);
     } catch (e) {
       console.warn("Chart error", e);
