@@ -132,7 +132,10 @@
   }
 
   async function scan({ tickers, strategies, minPop, maxDte, onProgress }) {
-    const results = [];
+    const filtered = [];
+    const allSetups = [];
+    const errors = [];
+    let ok = 0;
     const r = CFG.RISK_FREE_RATE;
     for (let i = 0; i < tickers.length; i++) {
       const t = tickers[i];
@@ -140,46 +143,60 @@
       try {
         const meta = await API.getOptionExpirations(t);
         const exp = pickExpiration(meta.expirations, maxDte);
-        if (!exp) continue;
+        if (!exp) { errors.push({ t, reason: "Keine Expiration im DTE-Range" }); continue; }
         const chainRes = await API.getOptionChain(t, exp);
         const S = chainRes.underlying?.regularMarketPrice;
-        if (!S) continue;
+        if (!S) { errors.push({ t, reason: "Kein Underlying-Preis" }); continue; }
         const dte = dteFrom(exp);
         const chain = chainRes.chain || {};
         const calls = (chain.calls || []).filter(c => c.bid > 0 || c.ask > 0);
         const puts = (chain.puts || []).filter(p => p.bid > 0 || p.ask > 0);
 
+        const collected = [];
         if (strategies.includes("csp")) {
           const otmPuts = puts.filter(p => p.strike < S && p.strike >= S * 0.85);
           for (const p of otmPuts) {
             const res = cashSecuredPut(t, S, p, dte, r);
-            if (res && res.pop >= minPop) results.push(res);
+            if (res) collected.push(res);
           }
         }
         if (strategies.includes("cc")) {
           const otmCalls = calls.filter(c => c.strike > S && c.strike <= S * 1.15);
           for (const c of otmCalls) {
             const res = coveredCall(t, S, c, dte, r);
-            if (res && res.pop >= minPop) results.push(res);
+            if (res) collected.push(res);
           }
         }
         if (strategies.includes("bps")) {
           const res = bullPutSpread(t, S, puts, dte, r);
-          if (res && res.pop >= minPop) results.push(res);
+          if (res) collected.push(res);
         }
         if (strategies.includes("lc")) {
           const nearMoney = calls.filter(c => c.strike >= S * 0.97 && c.strike <= S * 1.10);
           for (const c of nearMoney) {
             const res = longCall(t, S, c, dte, r);
-            if (res) results.push(res);
+            if (res) collected.push(res);
           }
         }
+        allSetups.push(...collected);
+        for (const res of collected) {
+          if (res.strategy === "lc" || res.pop >= minPop) filtered.push(res);
+        }
+        ok++;
       } catch (e) {
+        errors.push({ t, reason: e.message || String(e) });
         console.warn("Scan-Fehler", t, e.message);
       }
     }
-    results.sort((a, b) => b.score - a.score);
-    return results.slice(0, 50);
+    filtered.sort((a, b) => b.score - a.score);
+    allSetups.sort((a, b) => b.score - a.score);
+    return {
+      results: filtered.slice(0, 50),
+      fallback: allSetups.slice(0, 30),
+      errors,
+      ok,
+      total: tickers.length,
+    };
   }
 
   window.STRAT = { scan };

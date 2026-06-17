@@ -16,6 +16,20 @@
     throw lastErr || new Error("All proxies failed");
   }
 
+  async function fetchTextViaProxy(url) {
+    let lastErr;
+    for (const proxify of CFG.CORS_PROXIES) {
+      try {
+        const res = await fetch(proxify(url), { cache: "no-store" });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const text = await res.text();
+        if (!text || text.length < 30) throw new Error("Leere Antwort");
+        return text;
+      } catch (e) { lastErr = e; }
+    }
+    throw lastErr || new Error("All proxies failed");
+  }
+
   async function getChartRaw(symbol, range = "1mo", interval = "1d") {
     const url = `${Y_CHART}/${encodeURIComponent(symbol)}?range=${range}&interval=${interval}&includePrePost=false`;
     const data = await fetchViaProxy(url);
@@ -89,14 +103,49 @@
     };
   }
 
-  async function getNews(rssUrl, count = 15) {
+  async function getNewsViaXml(rssUrl) {
+    const buster = Math.floor(Date.now() / 60_000);
+    const urlWithBuster = rssUrl + (rssUrl.includes("?") ? "&" : "?") + `_=${buster}`;
+    const text = await fetchTextViaProxy(urlWithBuster);
+    const doc = new DOMParser().parseFromString(text, "text/xml");
+    if (doc.querySelector("parsererror")) throw new Error("XML Parse Error");
+    let items = Array.from(doc.querySelectorAll("item")).map(i => ({
+      title: i.querySelector("title")?.textContent?.trim() || "",
+      link: i.querySelector("link")?.textContent?.trim() || "",
+      pubDate: i.querySelector("pubDate")?.textContent || new Date().toISOString(),
+      description: i.querySelector("description")?.textContent || "",
+    }));
+    if (!items.length) {
+      items = Array.from(doc.querySelectorAll("entry")).map(e => ({
+        title: e.querySelector("title")?.textContent?.trim() || "",
+        link: e.querySelector("link")?.getAttribute("href") || e.querySelector("link")?.textContent?.trim() || "",
+        pubDate: e.querySelector("published")?.textContent || e.querySelector("updated")?.textContent || new Date().toISOString(),
+        description: e.querySelector("summary")?.textContent || e.querySelector("content")?.textContent || "",
+      }));
+    }
+    items = items.filter(x => x.title && x.link);
+    if (!items.length) throw new Error("Keine Items im Feed");
+    return items;
+  }
+
+  async function getNewsViaRss2Json(rssUrl, count = 20) {
     const buster = Math.floor(Date.now() / 60_000);
     const url = `${RSS2JSON}?rss_url=${encodeURIComponent(rssUrl)}&count=${count}&_=${buster}`;
     const res = await fetch(url, { cache: "no-store" });
-    if (!res.ok) throw new Error("News fetch failed: " + res.status);
+    if (!res.ok) throw new Error("HTTP " + res.status);
     const data = await res.json();
-    if (data.status !== "ok") throw new Error("RSS parse failed");
+    if (data.status !== "ok") throw new Error(data.message || "RSS parse failed");
     return data.items || [];
+  }
+
+  async function getNews(rssUrl, count = 20) {
+    try {
+      const items = await getNewsViaXml(rssUrl);
+      return items.slice(0, count);
+    } catch (eXml) {
+      const items = await getNewsViaRss2Json(rssUrl, count);
+      return items;
+    }
   }
 
   window.API = { getQuotes, getChart, getChartRaw, getOptionExpirations, getOptionChain, getNews };

@@ -1,7 +1,7 @@
 (() => {
   let chart;
 
-  function render(canvasId, points, symbol, opts = {}) {
+  function render(canvasId, points, symbol, opts = {}, pre = {}) {
     const ctx = document.getElementById(canvasId).getContext("2d");
     const labels = points.map(p => p.t);
     const closes = points.map(p => p.c);
@@ -38,33 +38,30 @@
       },
     ];
 
-    if (opts.sma20) {
-      const s = IND.sma(closes, 20);
+    if (opts.sma20 && pre.sma20) {
       datasets.push({
-        type: "line", label: "SMA 20", data: s,
+        type: "line", label: "SMA 20", data: pre.sma20,
         borderColor: "#f59e0b", borderWidth: 1.4, pointRadius: 0,
-        borderDash: [], fill: false, tension: 0.1, yAxisID: "y", order: 3,
+        spanGaps: false, fill: false, tension: 0.1, yAxisID: "y", order: 3,
       });
     }
-    if (opts.sma50) {
-      const s = IND.sma(closes, 50);
+    if (opts.sma50 && pre.sma50) {
       datasets.push({
-        type: "line", label: "SMA 50", data: s,
+        type: "line", label: "SMA 50", data: pre.sma50,
         borderColor: "#a855f7", borderWidth: 1.4, pointRadius: 0,
-        borderDash: [4, 3], fill: false, tension: 0.1, yAxisID: "y", order: 3,
+        borderDash: [4, 3], spanGaps: false, fill: false, tension: 0.1, yAxisID: "y", order: 3,
       });
     }
-    if (opts.bollinger) {
-      const bb = IND.bollinger(closes, 20, 2);
+    if (opts.bollinger && pre.bbUpper && pre.bbLower) {
       datasets.push({
-        type: "line", label: "BB Upper", data: bb.upper,
+        type: "line", label: "BB Upper", data: pre.bbUpper,
         borderColor: "rgba(94,234,212,0.55)", borderWidth: 1, pointRadius: 0,
-        borderDash: [3, 3], fill: false, yAxisID: "y", order: 4,
+        borderDash: [3, 3], spanGaps: false, fill: false, yAxisID: "y", order: 4,
       });
       datasets.push({
-        type: "line", label: "BB Lower", data: bb.lower,
+        type: "line", label: "BB Lower", data: pre.bbLower,
         borderColor: "rgba(94,234,212,0.55)", borderWidth: 1, pointRadius: 0,
-        borderDash: [3, 3], fill: "-1", backgroundColor: "rgba(94,234,212,0.06)",
+        borderDash: [3, 3], spanGaps: false, fill: "-1", backgroundColor: "rgba(94,234,212,0.06)",
         yAxisID: "y", order: 4,
       });
     }

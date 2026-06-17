@@ -9,6 +9,9 @@
   const SCAN_INITIAL_DELAY = 3_000;
   const CHART_CACHE_PREFIX = "sp500cache:chart:";
 
+  const RANGE_FETCH = { "5d": "1mo", "1mo": "6mo", "3mo": "1y", "6mo": "2y", "1y": "2y" };
+  const RANGE_DISPLAY_COUNT = { "5d": null, "1mo": 22, "3mo": 66, "6mo": 132, "1y": 252 };
+
   const state = {
     ticker: CFG.DEFAULT_TICKER,
     range: "1mo",
@@ -16,7 +19,8 @@
     scanRunning: false,
     timers: {},
     indicators: { sma20: true, sma50: true, bollinger: true },
-    lastPoints: null,
+    lastRender: null,
+    lastMovers: [],
   };
 
   const $ = (id) => document.getElementById(id);
@@ -43,10 +47,10 @@
     el.classList.add("flash-update");
   }
 
-  function cacheChartKey() { return `${CHART_CACHE_PREFIX}${state.ticker}:${state.range}`; }
-  function loadCachedChart() {
+  function cacheChartKey(sym, range) { return `${CHART_CACHE_PREFIX}${sym}:${range}`; }
+  function loadCachedChart(sym = state.ticker, range = state.range) {
     try {
-      const raw = localStorage.getItem(cacheChartKey());
+      const raw = localStorage.getItem(cacheChartKey(sym, range));
       if (!raw) return null;
       const obj = JSON.parse(raw);
       if (Date.now() - obj.ts > CFG.CHART_CACHE_TTL_MS) return null;
@@ -54,13 +58,33 @@
       return obj;
     } catch { return null; }
   }
-  function saveCachedChart(meta, points) {
+  function saveCachedChart(sym, range, meta, points, pre, fullClosesLen) {
     try {
-      localStorage.setItem(cacheChartKey(), JSON.stringify({
-        ts: Date.now(), meta,
+      localStorage.setItem(cacheChartKey(sym, range), JSON.stringify({
+        ts: Date.now(), meta, pre, fullClosesLen,
         points: points.map(p => ({ ...p, t: p.t.toISOString() })),
       }));
     } catch {}
+  }
+
+  function computeIndicatorsSliced(fullPoints, displayCount) {
+    const closes = fullPoints.map(p => p.c);
+    const sma20Full = IND.sma(closes, 20);
+    const sma50Full = IND.sma(closes, 50);
+    const bbFull = IND.bollinger(closes, 20, 2);
+    const startIdx = displayCount ? Math.max(0, fullPoints.length - displayCount) : 0;
+    const points = fullPoints.slice(startIdx);
+    return {
+      points,
+      pre: {
+        sma20: sma20Full.slice(startIdx),
+        sma50: sma50Full.slice(startIdx),
+        bbUpper: bbFull.upper.slice(startIdx),
+        bbLower: bbFull.lower.slice(startIdx),
+        bbMid: bbFull.mid.slice(startIdx),
+      },
+      fullCloses: closes,
+    };
   }
 
   async function loadMarketSummary({ silent = false } = {}) {
@@ -107,6 +131,7 @@
       else if (kind === "losers") sorted.sort((a, b) => (a.regularMarketChangePercent || 0) - (b.regularMarketChangePercent || 0));
       else sorted.sort((a, b) => (b.regularMarketVolume || 0) - (a.regularMarketVolume || 0));
       sorted = sorted.slice(0, 20);
+      state.lastMovers = sorted;
       list.innerHTML = sorted.map(q => {
         const chg = q.regularMarketChangePercent || 0;
         const cls = chg >= 0 ? "up" : "down";
@@ -121,6 +146,7 @@
         row.addEventListener("click", () => selectTicker(row.dataset.sym));
       });
       setStamp("movers-stamp", false);
+      prefetchMoverCharts(sorted.slice(0, 6));
     } catch (e) {
       if (!silent) list.innerHTML = `<div class="news-item">Fehler beim Laden: ${e.message}</div>`;
       console.warn("Movers error", e);
@@ -128,8 +154,29 @@
     }
   }
 
-  function renderChartFromData(meta, points) {
-    CHARTS.render("price-chart", points, state.ticker, state.indicators);
+  async function prefetchMoverCharts(movers) {
+    for (const m of movers) {
+      if (m.symbol === state.ticker) continue;
+      const cached = loadCachedChart(m.symbol, "1mo");
+      if (cached) continue;
+      try {
+        const { meta, points: fullPoints } = await API.getChart(m.symbol, RANGE_FETCH["1mo"], "1d");
+        const { points, pre, fullCloses } = computeIndicatorsSliced(fullPoints, RANGE_DISPLAY_COUNT["1mo"]);
+        saveCachedChart(m.symbol, "1mo", meta, points, pre, fullCloses.length);
+      } catch (e) {
+        console.debug("Prefetch fehlgeschlagen", m.symbol);
+      }
+      await new Promise(r => setTimeout(r, 600));
+    }
+  }
+
+  function renderChartFromCache(cached) {
+    state.lastRender = { meta: cached.meta, points: cached.points, pre: cached.pre };
+    CHARTS.render("price-chart", cached.points, state.ticker, state.indicators, cached.pre);
+    updateChartHeaderAndMetrics(cached.meta, cached.points, cached.pre);
+  }
+
+  function updateChartHeaderAndMetrics(meta, points, pre) {
     $("chart-title").textContent = state.ticker;
     const price = meta.regularMarketPrice;
     const prev = meta.chartPreviousClose || meta.previousClose;
@@ -153,10 +200,8 @@
     const rsiCls = rsi == null ? "neutral" : (rsi < 30 ? "oversold" : rsi > 70 ? "overbought" : "neutral");
     const rsiLabel = rsi == null ? "—" : (rsi < 30 ? "Oversold" : rsi > 70 ? "Overbought" : "Neutral");
 
-    const sma20 = IND.sma(closes, 20);
-    const sma50 = IND.sma(closes, 50);
-    const lastSma20 = sma20[sma20.length - 1];
-    const lastSma50 = sma50[sma50.length - 1];
+    const lastSma20 = pre?.sma20?.[pre.sma20.length - 1];
+    const lastSma50 = pre?.sma50?.[pre.sma50.length - 1];
     let trend = "—";
     if (lastSma20 != null && lastSma50 != null) {
       if (price > lastSma20 && lastSma20 > lastSma50) trend = "↑ Bullish";
@@ -183,21 +228,22 @@
 
   async function loadChart({ silent = false } = {}) {
     setStamp("chart-stamp", true);
-    if (!silent) {
-      const cached = loadCachedChart();
-      if (cached) {
-        try { renderChartFromData(cached.meta, cached.points); } catch {}
-      }
+    const cached = loadCachedChart();
+    if (cached) {
+      try { renderChartFromCache(cached); } catch {}
     }
     try {
+      const fetchRange = RANGE_FETCH[state.range] || state.range;
       const interval = state.range === "5d" ? "30m" : "1d";
-      const { meta, points } = await API.getChart(state.ticker, state.range, interval);
-      state.lastPoints = { meta, points };
-      renderChartFromData(meta, points);
-      saveCachedChart(meta, points);
+      const { meta, points: fullPoints } = await API.getChart(state.ticker, fetchRange, interval);
+      const { points, pre, fullCloses } = computeIndicatorsSliced(fullPoints, RANGE_DISPLAY_COUNT[state.range]);
+      state.lastRender = { meta, points, pre };
+      CHARTS.render("price-chart", points, state.ticker, state.indicators, pre);
+      updateChartHeaderAndMetrics(meta, points, pre);
+      saveCachedChart(state.ticker, state.range, meta, points, pre, fullCloses.length);
       setStamp("chart-stamp", false);
     } catch (e) {
-      if (!silent && !state.lastPoints) $("chart-sub").textContent = "Fehler: " + e.message;
+      if (!silent && !state.lastRender) $("chart-sub").textContent = "Fehler: " + e.message;
       console.warn("Chart error", e);
       setStamp("chart-stamp", false);
     }
@@ -217,7 +263,25 @@
   function selectTicker(sym) {
     state.ticker = sym.toUpperCase();
     $("ticker-input").value = state.ticker;
+    state.lastRender = null;
     loadChart();
+  }
+
+  function renderScanRow(r) {
+    const expDate = new Date(r.expirationDate * 1000).toLocaleDateString("de-DE");
+    const premiumStr = r.strategy === "lc" ? `-$${fmt(Math.abs(r.premium))}` : `$${fmt(r.premium)}`;
+    return `<tr>
+      <td><strong>${r.ticker}</strong></td>
+      <td><span class="strat-tag ${r.strategy}">${r.strategyLabel}</span></td>
+      <td>${r.setup}</td>
+      <td>${expDate}</td>
+      <td class="num">${r.dte}</td>
+      <td class="num">${premiumStr}</td>
+      <td class="num">$${fmt(r.maxRisk)}</td>
+      <td class="num">${(r.pop * 100).toFixed(1)}%</td>
+      <td class="num">${(r.annRet * 100).toFixed(1)}%</td>
+      <td class="num">${(r.score * 100).toFixed(1)}</td>
+    </tr>`;
   }
 
   async function runScan({ silent = false } = {}) {
@@ -231,42 +295,34 @@
     status.textContent = silent ? "Auto-Scan läuft…" : "Starte Scan…";
 
     const minPop = (parseFloat($("min-pop").value) || 0) / 100;
-    const maxDte = parseInt($("max-dte").value) || 45;
+    const maxDte = parseInt($("max-dte").value) || 60;
     const sel = $("strategy-select").value;
     const strategies = sel === "all" ? ["csp", "cc", "bps", "lc"] : [sel];
 
     try {
       const tickers = CFG.SCAN_TICKERS.slice(0, 25);
-      const results = await STRAT.scan({
+      const { results, fallback, errors, ok, total } = await STRAT.scan({
         tickers, strategies, minPop, maxDte,
         onProgress: (i, n, t) => { status.textContent = `Scanne ${i}/${n}: ${t}`; },
       });
-      if (!results.length) {
+
+      const errCount = errors.length;
+      if (results.length) {
         status.className = "scan-status";
-        status.textContent = "Keine Treffer mit aktuellen Filtern.";
-        setStamp("scan-stamp", false);
-        return;
+        status.textContent = `${results.length} Vorschläge (${ok}/${total} Ticker OK${errCount ? `, ${errCount} Fehler` : ""}). Nächster Auto-Scan in 15 Min.`;
+        body.innerHTML = results.map(renderScanRow).join("");
+      } else if (fallback.length) {
+        status.className = "scan-status";
+        status.textContent = `Keine Treffer mit Filter (Min-POP ${(minPop*100).toFixed(0)}%) — zeige Top ${fallback.length} unter dem Filter. ${ok}/${total} OK${errCount ? `, ${errCount} Fehler` : ""}.`;
+        body.innerHTML = fallback.map(renderScanRow).join("");
+      } else if (ok === 0 && errCount > 0) {
+        status.className = "scan-status error";
+        const sampleErr = errors[0]?.reason || "unbekannt";
+        status.textContent = `Optionsdaten nicht abrufbar (0/${total} OK). Beispiel-Fehler: ${sampleErr}. Yahoo Optionen-Endpoint evtl. blockiert.`;
+      } else {
+        status.className = "scan-status";
+        status.textContent = `${ok}/${total} Ticker gescannt, keine handelbaren Setups gefunden.`;
       }
-      status.className = "scan-status";
-      status.textContent = `${results.length} Vorschläge gefunden (Top 50, sortiert nach Score). Nächster Auto-Scan in 15 Min.`;
-      body.innerHTML = results.map(r => {
-        const expDate = new Date(r.expirationDate * 1000).toLocaleDateString("de-DE");
-        const premiumStr = r.strategy === "lc"
-          ? `-$${fmt(Math.abs(r.premium))}`
-          : `$${fmt(r.premium)}`;
-        return `<tr>
-          <td><strong>${r.ticker}</strong></td>
-          <td><span class="strat-tag ${r.strategy}">${r.strategyLabel}</span></td>
-          <td>${r.setup}</td>
-          <td>${expDate}</td>
-          <td class="num">${r.dte}</td>
-          <td class="num">${premiumStr}</td>
-          <td class="num">$${fmt(r.maxRisk)}</td>
-          <td class="num">${(r.pop * 100).toFixed(1)}%</td>
-          <td class="num">${(r.annRet * 100).toFixed(1)}%</td>
-          <td class="num">${(r.score * 100).toFixed(1)}</td>
-        </tr>`;
-      }).join("");
       setStamp("scan-stamp", false);
     } catch (e) {
       status.className = "scan-status error";
@@ -294,6 +350,7 @@
         document.querySelectorAll(".range-btn").forEach(x => x.classList.remove("active"));
         b.classList.add("active");
         state.range = b.dataset.range;
+        state.lastRender = null;
         loadChart();
       });
     });
@@ -313,7 +370,9 @@
       cb.addEventListener("change", () => {
         const k = key === "bb" ? "bollinger" : key;
         state.indicators[k] = cb.checked;
-        if (state.lastPoints) renderChartFromData(state.lastPoints.meta, state.lastPoints.points);
+        if (state.lastRender) {
+          CHARTS.render("price-chart", state.lastRender.points, state.ticker, state.indicators, state.lastRender.pre);
+        }
       });
     });
 
