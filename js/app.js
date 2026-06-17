@@ -34,6 +34,40 @@
     return n >= 0 ? `+${v}%` : `${v}%`;
   };
   const nowTime = () => new Date().toLocaleTimeString("de-DE");
+  const fmtVol = (n) => {
+    if (n == null || isNaN(n)) return "—";
+    if (n >= 1e9) return (n / 1e9).toFixed(1) + "B";
+    if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
+    if (n >= 1e3) return (n / 1e3).toFixed(0) + "K";
+    return String(n);
+  };
+
+  // Mini-Sparkline aus Intraday-Closes als kompaktes SVG
+  function sparklineSvg(closes, up) {
+    if (!closes || closes.length < 2) return `<svg class="mv-spark" viewBox="0 0 80 28"></svg>`;
+    const w = 80, h = 28, pad = 2;
+    const min = Math.min(...closes), max = Math.max(...closes);
+    const range = max - min || 1;
+    const n = closes.length;
+    const pts = closes.map((c, i) => {
+      const x = pad + (i / (n - 1)) * (w - 2 * pad);
+      const y = pad + (1 - (c - min) / range) * (h - 2 * pad);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    });
+    const color = up ? "var(--up)" : "var(--down)";
+    const lastY = pts[pts.length - 1].split(",")[1];
+    const areaPts = `${pad},${h - pad} ${pts.join(" ")} ${w - pad},${h - pad}`;
+    const gid = "g" + Math.random().toString(36).slice(2, 8);
+    return `<svg class="mv-spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+      <defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${color}" stop-opacity="0.35"/>
+        <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
+      </linearGradient></defs>
+      <polygon points="${areaPts}" fill="url(#${gid})"/>
+      <polyline points="${pts.join(" ")}" fill="none" stroke="${color}" stroke-width="1.3" stroke-linejoin="round"/>
+      <circle cx="${(w - pad).toFixed(1)}" cy="${lastY}" r="1.6" fill="${color}"/>
+    </svg>`;
+  }
 
   function setStamp(id, refreshing) {
     const el = $(id);
@@ -128,43 +162,60 @@
     }
   }
 
+  function renderMovers(quotes, kind) {
+    const list = $("movers-list");
+    let sorted = quotes.filter(q => q.regularMarketPrice != null);
+    if (kind === "gainers") sorted.sort((a, b) => (b.regularMarketChangePercent || 0) - (a.regularMarketChangePercent || 0));
+    else if (kind === "losers") sorted.sort((a, b) => (a.regularMarketChangePercent || 0) - (b.regularMarketChangePercent || 0));
+    else sorted.sort((a, b) => (b.regularMarketVolume || 0) - (a.regularMarketVolume || 0));
+    sorted = sorted.slice(0, 20);
+    state.lastMovers = sorted;
+    list.innerHTML = sorted.map((q, i) => {
+      const chg = q.regularMarketChangePercent || 0;
+      const cls = chg >= 0 ? "up" : "down";
+      const sign = chg >= 0 ? "+" : "";
+      const name = CFG.TICKER_NAMES[q.symbol] || "";
+      const spark = sparklineSvg(q.spark, chg >= 0);
+      return `<div class="mover-row" data-sym="${q.symbol}">
+        <span class="mv-rank">${i + 1}</span>
+        <div class="mv-id">
+          <span class="sym">${q.symbol}</span>
+          <span class="mv-name">${name}</span>
+        </div>
+        ${spark}
+        <div class="mv-num">
+          <span class="price">$${fmt(q.regularMarketPrice)}</span>
+          <span class="chg ${cls}">${sign}${chg.toFixed(2)}%</span>
+          <span class="mv-vol">Vol ${fmtVol(q.regularMarketVolume)}</span>
+        </div>
+      </div>`;
+    }).join("");
+    list.querySelectorAll(".mover-row").forEach(row => {
+      row.addEventListener("click", () => selectTicker(row.dataset.sym));
+    });
+    return sorted;
+  }
+
   async function loadMovers({ silent = false, kind = state.moverTab } = {}) {
     const list = $("movers-list");
     setStamp("movers-stamp", true);
     if (!silent && !list.querySelector(".mover-row")) list.innerHTML = "Lade…";
     try {
-      let quotes = await API.getQuotes(CFG.SCAN_TICKERS);
-      // Bei (teilweisem) Proxy-Ausfall: letzten guten Stand wiederverwenden statt Fehler
+      // Progressiv rendern: jeder fertige Chunk aktualisiert die Liste sofort
+      let quotes = await API.getQuotes(CFG.SCAN_TICKERS, (partial) => {
+        if (partial.length >= 5) renderMovers(partial, kind);
+      });
       if (quotes.length < 5 && state.lastQuotes.length) {
         quotes = state.lastQuotes;
       } else if (quotes.length >= 5) {
         state.lastQuotes = quotes;
       }
       if (!quotes.length) throw new Error("Keine Quotes erhalten (Proxy evtl. überlastet)");
-      let sorted = quotes.filter(q => q.regularMarketPrice != null);
-      if (kind === "gainers") sorted.sort((a, b) => (b.regularMarketChangePercent || 0) - (a.regularMarketChangePercent || 0));
-      else if (kind === "losers") sorted.sort((a, b) => (a.regularMarketChangePercent || 0) - (b.regularMarketChangePercent || 0));
-      else sorted.sort((a, b) => (b.regularMarketVolume || 0) - (a.regularMarketVolume || 0));
-      sorted = sorted.slice(0, 20);
-      state.lastMovers = sorted;
-      list.innerHTML = sorted.map(q => {
-        const chg = q.regularMarketChangePercent || 0;
-        const cls = chg >= 0 ? "up" : "down";
-        const sign = chg >= 0 ? "+" : "";
-        return `<div class="mover-row" data-sym="${q.symbol}">
-          <span class="sym">${q.symbol}</span>
-          <span class="price">$${fmt(q.regularMarketPrice)}</span>
-          <span class="chg ${cls}">${sign}${chg.toFixed(2)}%</span>
-        </div>`;
-      }).join("");
-      list.querySelectorAll(".mover-row").forEach(row => {
-        row.addEventListener("click", () => selectTicker(row.dataset.sym));
-      });
+      const sorted = renderMovers(quotes, kind);
       setStamp("movers-stamp", false);
       prefetchMoverCharts(sorted.slice(0, 6));
     } catch (e) {
       console.warn("Movers error", e);
-      // Letzten guten Stand behalten falls vorhanden
       if (!list.querySelector(".mover-row") && !silent) {
         list.innerHTML = `<div class="news-item">Daten gerade nicht abrufbar (${e.message}). Nächster Versuch in 60s.</div>`;
       }

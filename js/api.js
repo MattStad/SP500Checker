@@ -97,26 +97,37 @@
     const results = data?.spark?.result || [];
     const out = [];
     for (const r of results) {
-      const m = r?.response?.[0]?.meta;
+      const resp = r?.response?.[0];
+      const m = resp?.meta;
       if (m) {
         const q = metaToQuote(m, r.symbol);
-        if (q) out.push(q);
+        if (q) {
+          // Intraday-Kursreihe für Mini-Sparkline mitnehmen (kostet nichts extra)
+          const closes = (resp.indicators?.quote?.[0]?.close || []).filter(v => v != null);
+          q.spark = closes;
+          out.push(q);
+        }
       }
     }
     return out;
   }
 
-  async function getQuotes(symbols) {
-    const chunkSize = 25; // Spark verträgt viele Symbole pro Request
+  async function getQuotes(symbols, onChunk) {
+    const chunkSize = 15; // kleinere Chunks → erste Ergebnisse erscheinen schneller
     const chunks = [];
     for (let i = 0; i < symbols.length; i += chunkSize) {
       chunks.push(symbols.slice(i, i + chunkSize));
     }
-    // Chunks parallel — bei 50 Tickern nur 2 Requests gesamt
-    const settled = await Promise.allSettled(chunks.map(getSparkChunk));
     const out = [];
-    for (const s of settled) if (s.status === "fulfilled") out.push(...s.value);
-    // Fallback: wenn Spark komplett scheitert, einzelne Chart-Calls (langsam, selten)
+    // Chunks parallel starten; onChunk feuert sobald ein Chunk fertig ist (progressiv)
+    await Promise.all(chunks.map(async (chunk) => {
+      try {
+        const part = await getSparkChunk(chunk);
+        out.push(...part);
+        onChunk?.(out.slice());
+      } catch (e) { /* einzelner Chunk fehlgeschlagen → Rest läuft weiter */ }
+    }));
+    // Fallback: wenn Spark komplett scheitert, einzelner Chart-Call (langsam, selten)
     if (!out.length && symbols.length) {
       const r = await getChartRaw(symbols[0], "5d", "1d").catch(() => null);
       if (r?.meta) { const q = metaToQuote(r.meta, symbols[0]); if (q) out.push(q); }

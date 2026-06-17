@@ -41,6 +41,18 @@ window.CFG = {
     { name: "Investing Stocks", url: "https://www.investing.com/rss/stock.rss" },
     { name: "SeekingAlpha", url: "https://seekingalpha.com/market_currents.xml" },
   ],
+  TICKER_NAMES: {
+    AAPL:"Apple", MSFT:"Microsoft", NVDA:"NVIDIA", AMZN:"Amazon", GOOGL:"Alphabet",
+    META:"Meta", TSLA:"Tesla", "BRK-B":"Berkshire H.", JPM:"JPMorgan", V:"Visa",
+    MA:"Mastercard", UNH:"UnitedHealth", XOM:"Exxon Mobil", JNJ:"Johnson & J.", WMT:"Walmart",
+    PG:"Procter & G.", HD:"Home Depot", COST:"Costco", BAC:"Bank of America", ABBV:"AbbVie",
+    ORCL:"Oracle", CRM:"Salesforce", AMD:"AMD", NFLX:"Netflix", ADBE:"Adobe",
+    KO:"Coca-Cola", PEP:"PepsiCo", MCD:"McDonald's", DIS:"Disney", CSCO:"Cisco",
+    INTC:"Intel", T:"AT&T", VZ:"Verizon", CVX:"Chevron", WFC:"Wells Fargo",
+    NKE:"Nike", BA:"Boeing", GE:"GE Aerospace", CAT:"Caterpillar", GS:"Goldman Sachs",
+    MS:"Morgan Stanley", C:"Citigroup", PFE:"Pfizer", MRK:"Merck", TGT:"Target",
+    LOW:"Lowe's", QCOM:"Qualcomm", AVGO:"Broadcom", IBM:"IBM", SPY:"S&P 500 ETF"
+  },
   DEFAULT_TICKER: "SPY",
   QUOTE_CHUNK_SIZE: 10,
   CHART_CACHE_TTL_MS: 5 * 60_000,
