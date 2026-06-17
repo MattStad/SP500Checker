@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>S&P 500 Options Analyzer</title>
+  <link rel="stylesheet" href="css/styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">●</span>
+      <h1>S&amp;P 500 Options Analyzer</h1>
+    </div>
+    <div class="market-summary" id="market-summary">
+      <div class="metric"><span class="label">S&amp;P 500</span><span class="value" id="spx-value">—</span><span class="delta" id="spx-delta">—</span></div>
+      <div class="metric"><span class="label">VIX</span><span class="value" id="vix-value">—</span><span class="delta" id="vix-delta">—</span></div>
+      <div class="metric"><span class="label">10Y</span><span class="value" id="tnx-value">—</span><span class="delta" id="tnx-delta">—</span></div>
+      <div class="metric"><span class="label">Aktualisiert</span><span class="value" id="last-update">—</span></div>
+      <div class="metric live-indicator"><span class="pulse-dot"></span><span class="label">LIVE</span></div>
+    </div>
+    <div class="actions">
+      <button id="refresh-btn" class="btn" title="Sofort alles aktualisieren">↻ Jetzt aktualisieren</button>
+    </div>
+  </header>
+
+  <div class="disclaimer">
+    ⚠️ <strong>Keine Anlageberatung.</strong> Diese App ist ein Bildungs-/Screening-Tool. Daten kommen über inoffizielle Endpunkte und können verzögert oder fehlerhaft sein. Optionshandel kann zum Totalverlust führen.
+  </div>
+
+  <main class="layout">
+
+    <section class="panel movers">
+      <div class="panel-head">
+        <h2>Top Movers</h2>
+        <span class="updated-stamp" id="movers-stamp">—</span>
+      </div>
+      <div class="tabs" id="movers-tabs">
+        <button class="tab active" data-mover="gainers">Gainer</button>
+        <button class="tab" data-mover="losers">Loser</button>
+        <button class="tab" data-mover="volume">Volumen</button>
+      </div>
+      <div id="movers-list" class="mover-list">Lade…</div>
+    </section>
+
+    <section class="panel chart-panel">
+      <div class="chart-header">
+        <div>
+          <h2 id="chart-title">SPY</h2>
+          <div class="chart-sub" id="chart-sub">—</div>
+          <span class="updated-stamp" id="chart-stamp">—</span>
+        </div>
+        <div class="chart-controls">
+          <input id="ticker-input" type="text" placeholder="Ticker (z.B. AAPL)" />
+          <button id="load-ticker-btn" class="btn small">Laden</button>
+          <div class="range-buttons">
+            <button class="range-btn" data-range="5d">5T</button>
+            <button class="range-btn active" data-range="1mo">1M</button>
+            <button class="range-btn" data-range="3mo">3M</button>
+            <button class="range-btn" data-range="6mo">6M</button>
+            <button class="range-btn" data-range="1y">1J</button>
+          </div>
+        </div>
+      </div>
+      <div class="indicator-toggles">
+        <label><input type="checkbox" id="ind-sma20" checked /> <span class="ind-pill sma20">SMA 20</span></label>
+        <label><input type="checkbox" id="ind-sma50" checked /> <span class="ind-pill sma50">SMA 50</span></label>
+        <label><input type="checkbox" id="ind-bb" checked /> <span class="ind-pill bb">Bollinger</span></label>
+      </div>
+      <canvas id="price-chart"></canvas>
+      <div class="metrics-row" id="ticker-metrics"></div>
+    </section>
+
+    <section class="panel news">
+      <div class="panel-head">
+        <h2>Live News</h2>
+        <span class="updated-stamp" id="news-stamp">—</span>
+      </div>
+      <div id="news-feed" class="news-list">Lade…</div>
+    </section>
+
+    <section class="panel strategies">
+      <div class="strategies-header">
+        <div class="panel-head">
+          <h2>Optionsstrategie-Vorschläge</h2>
+          <span class="updated-stamp" id="scan-stamp">—</span>
+        </div>
+        <div class="strategy-controls">
+          <label>Strategie:
+            <select id="strategy-select">
+              <option value="all">Alle</option>
+              <option value="csp">Cash-Secured Put</option>
+              <option value="cc">Covered Call</option>
+              <option value="bps">Bull Put Spread</option>
+              <option value="lc">Long Call</option>
+            </select>
+          </label>
+          <label>Min POP:
+            <input type="number" id="min-pop" value="65" min="0" max="100" step="5" />%
+          </label>
+          <label>Max DTE:
+            <input type="number" id="max-dte" value="45" min="1" max="365" />
+          </label>
+          <button id="scan-btn" class="btn">⚡ Scannen</button>
+        </div>
+      </div>
+      <div id="scan-status" class="scan-status">Klicke "Scannen" um Strategien zu finden.</div>
+      <div class="strategies-table-wrap">
+        <table id="strategies-table" class="strategies-table">
+          <thead>
+            <tr>
+              <th>Ticker</th>
+              <th>Strategie</th>
+              <th>Setup</th>
+              <th>Verfall</th>
+              <th>DTE</th>
+              <th>Prämie</th>
+              <th>Max Risiko</th>
+              <th>POP</th>
+              <th>Ann. Rendite</th>
+              <th>Score</th>
+            </tr>
+          </thead>
+          <tbody id="strategies-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="footer">
+    <span>Daten: Yahoo Finance (inoffiziell) • News: RSS • Open Source</span>
+    <a href="https://github.com" id="repo-link">GitHub</a>
+  </footer>
+
+  <script src="js/config.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/indicators.js"></script>
+  <script src="js/blackscholes.js"></script>
+  <script src="js/strategies.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/news.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
