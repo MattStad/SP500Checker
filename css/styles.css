@@ -179,7 +179,7 @@ body {
   background-clip: padding-box;
 }
 
-.mover-list { display: flex; flex-direction: column; gap: 4px; overflow-y: auto; flex: 1; max-height: 520px; padding-right: 4px; scroll-behavior: smooth; }
+.mover-list { display: flex; flex-direction: column; gap: 4px; overflow-y: auto; flex: 1 1 0; min-height: 0; padding-right: 4px; scroll-behavior: smooth; }
 .mover-list::-webkit-scrollbar-thumb { min-height: 40px; }
 .mover-row {
   display: grid;
@@ -288,7 +288,7 @@ body {
 .metric-cell .k { color: var(--text-dim); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.4px; }
 .metric-cell .v { font-family: var(--mono); font-weight: 600; font-size: 0.9rem; }
 
-.news-list { display: flex; flex-direction: column; gap: 0.5rem; overflow-y: auto; max-height: 520px; padding-right: 4px; scroll-behavior: smooth; }
+.news-list { display: flex; flex-direction: column; gap: 0.5rem; overflow-y: auto; flex: 1 1 0; min-height: 0; padding-right: 4px; scroll-behavior: smooth; }
 .news-item {
   border-left: 2px solid var(--accent-2);
   padding: 0.45rem 0.6rem;
@@ -362,4 +362,6 @@ body {
     grid-template-areas: "chart" "movers" "news" "strategies";
   }
   #price-chart { max-height: 280px; }
+  /* Einspaltig: Panels sind auto-hoch → feste Höhe statt flex-fill (sonst kollabiert die Liste) */
+  .mover-list, .news-list { flex: 0 1 auto; height: 60vh; max-height: 560px; }
 }
