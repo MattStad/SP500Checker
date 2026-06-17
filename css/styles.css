@@ -339,6 +339,7 @@ body {
 .strategies-table tbody tr { transition: background 0.1s; }
 .strategies-table tbody tr:hover { background: var(--bg-elev2); }
 .strategies-table td.num { font-family: var(--mono); text-align: right; }
+.strategies-table th.num { text-align: right; }
 .strategies-table .strat-tag { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: 600; }
 .strat-tag.csp { background: rgba(96, 165, 250, 0.15); color: #93c5fd; }
 .strat-tag.cc  { background: rgba(94, 234, 212, 0.15); color: #5eead4; }
