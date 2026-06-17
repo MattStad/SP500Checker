@@ -70,34 +70,56 @@
     return { meta: r.meta, points };
   }
 
-  async function getQuotes(symbols) {
-    const chunkSize = CFG.QUOTE_CHUNK_SIZE || 10;
+  const Y_SPARK = "https://query1.finance.yahoo.com/v7/finance/spark";
+
+  function metaToQuote(m, fallbackSymbol) {
+    const price = m.regularMarketPrice;
+    if (price == null) return null;
+    // previousClose = gestriger Schluss (korrekt für Tagesänderung)
+    const prev = m.previousClose ?? m.chartPreviousClose;
+    return {
+      symbol: m.symbol || fallbackSymbol,
+      regularMarketPrice: price,
+      regularMarketChangePercent: prev ? ((price - prev) / prev) * 100 : 0,
+      regularMarketChange: prev ? (price - prev) : 0,
+      regularMarketVolume: m.regularMarketVolume,
+      regularMarketPreviousClose: prev,
+      fiftyTwoWeekHigh: m.fiftyTwoWeekHigh,
+      fiftyTwoWeekLow: m.fiftyTwoWeekLow,
+      currency: m.currency,
+    };
+  }
+
+  // Spark batcht VIELE Symbole in EINE Anfrage → drastisch weniger Proxy-Last
+  async function getSparkChunk(symbols) {
+    const url = `${Y_SPARK}?symbols=${encodeURIComponent(symbols.join(","))}&range=1d&interval=5m`;
+    const data = await fetchViaProxy(url);
+    const results = data?.spark?.result || [];
     const out = [];
+    for (const r of results) {
+      const m = r?.response?.[0]?.meta;
+      if (m) {
+        const q = metaToQuote(m, r.symbol);
+        if (q) out.push(q);
+      }
+    }
+    return out;
+  }
+
+  async function getQuotes(symbols) {
+    const chunkSize = 25; // Spark verträgt viele Symbole pro Request
+    const chunks = [];
     for (let i = 0; i < symbols.length; i += chunkSize) {
-      const chunk = symbols.slice(i, i + chunkSize);
-      const results = await Promise.all(chunk.map(async (s) => {
-        try {
-          const r = await getChartRaw(s, "5d", "1d");
-          const m = r.meta || {};
-          const price = m.regularMarketPrice;
-          // previousClose = gestriger Schluss (korrekt für Tagesänderung);
-          // chartPreviousClose = Schluss VOR dem 5T-Fenster (falsch für Tagesänderung)
-          const prev = m.previousClose ?? m.chartPreviousClose;
-          if (price == null) return null;
-          return {
-            symbol: m.symbol || s,
-            regularMarketPrice: price,
-            regularMarketChangePercent: prev ? ((price - prev) / prev) * 100 : 0,
-            regularMarketChange: prev ? (price - prev) : 0,
-            regularMarketVolume: m.regularMarketVolume,
-            regularMarketPreviousClose: prev,
-            currency: m.currency,
-          };
-        } catch (e) {
-          return null;
-        }
-      }));
-      out.push(...results.filter(Boolean));
+      chunks.push(symbols.slice(i, i + chunkSize));
+    }
+    // Chunks parallel — bei 50 Tickern nur 2 Requests gesamt
+    const settled = await Promise.allSettled(chunks.map(getSparkChunk));
+    const out = [];
+    for (const s of settled) if (s.status === "fulfilled") out.push(...s.value);
+    // Fallback: wenn Spark komplett scheitert, einzelne Chart-Calls (langsam, selten)
+    if (!out.length && symbols.length) {
+      const r = await getChartRaw(symbols[0], "5d", "1d").catch(() => null);
+      if (r?.meta) { const q = metaToQuote(r.meta, symbols[0]); if (q) out.push(q); }
     }
     return out;
   }

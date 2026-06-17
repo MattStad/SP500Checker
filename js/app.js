@@ -10,7 +10,8 @@
   const CHART_CACHE_PREFIX = "sp500cache:v2:chart:";
 
   const RANGE_FETCH = { "5d": "1mo", "1mo": "6mo", "3mo": "1y", "6mo": "2y", "1y": "2y" };
-  const RANGE_DISPLAY_COUNT = { "5d": null, "1mo": 22, "3mo": 66, "6mo": 132, "1y": 252 };
+  // Anzeige-Fenster in Tagen (echte Kalendertage, robust gegen Bar-Intervall)
+  const RANGE_DISPLAY_DAYS = { "5d": 7, "1mo": 31, "3mo": 93, "6mo": 187, "1y": 372 };
 
   const state = {
     ticker: CFG.DEFAULT_TICKER,
@@ -59,21 +60,28 @@
       return obj;
     } catch { return null; }
   }
-  function saveCachedChart(sym, range, meta, points, pre, fullCloses) {
+  function saveCachedChart(sym, range, meta, points, pre, fullCloses, quote) {
     try {
       localStorage.setItem(cacheChartKey(sym, range), JSON.stringify({
-        ts: Date.now(), meta, pre, fullCloses,
+        ts: Date.now(), meta, pre, fullCloses, quote,
         points: points.map(p => ({ ...p, t: p.t.toISOString() })),
       }));
     } catch {}
   }
 
-  function computeIndicatorsSliced(fullPoints, displayCount) {
+  function computeIndicatorsSliced(fullPoints, displayDays) {
     const closes = fullPoints.map(p => p.c);
     const sma20Full = IND.sma(closes, 20);
     const sma50Full = IND.sma(closes, 50);
     const bbFull = IND.bollinger(closes, 20, 2);
-    const startIdx = displayCount ? Math.max(0, fullPoints.length - displayCount) : 0;
+    // Slicing nach echtem Datum: zeige nur Punkte innerhalb des Anzeige-Fensters
+    let startIdx = 0;
+    if (displayDays && fullPoints.length) {
+      const lastT = fullPoints[fullPoints.length - 1].t.getTime();
+      const cutoff = lastT - displayDays * 86_400_000;
+      startIdx = fullPoints.findIndex(p => p.t.getTime() >= cutoff);
+      if (startIdx < 0) startIdx = 0;
+    }
     const points = fullPoints.slice(startIdx);
     return {
       points,
@@ -171,7 +179,7 @@
       if (cached) continue;
       try {
         const { meta, points: fullPoints } = await API.getChart(m.symbol, RANGE_FETCH["1mo"], "1d");
-        const { points, pre, fullCloses } = computeIndicatorsSliced(fullPoints, RANGE_DISPLAY_COUNT["1mo"]);
+        const { points, pre, fullCloses } = computeIndicatorsSliced(fullPoints, RANGE_DISPLAY_DAYS["1mo"]);
         saveCachedChart(m.symbol, "1mo", meta, points, pre, fullCloses);
       } catch (e) {
         console.debug("Prefetch fehlgeschlagen", m.symbol);
@@ -181,16 +189,16 @@
   }
 
   function renderChartFromCache(cached) {
-    state.lastRender = { meta: cached.meta, points: cached.points, pre: cached.pre, fullCloses: cached.fullCloses };
+    state.lastRender = { meta: cached.meta, points: cached.points, pre: cached.pre, fullCloses: cached.fullCloses, quote: cached.quote };
     CHARTS.render("price-chart", cached.points, state.ticker, state.indicators, cached.pre);
-    updateChartHeaderAndMetrics(cached.meta, cached.points, cached.pre, cached.fullCloses);
+    updateChartHeaderAndMetrics(cached.meta, cached.points, cached.pre, cached.fullCloses, cached.quote);
   }
 
-  function updateChartHeaderAndMetrics(meta, points, pre, fullCloses) {
+  function updateChartHeaderAndMetrics(meta, points, pre, fullCloses, quote) {
     $("chart-title").textContent = state.ticker;
-    const price = meta.regularMarketPrice;
-    // Tagesänderung (gestriger Schluss), nicht die Änderung über den Hol-Zeitraum
-    const prev = meta.previousClose || meta.chartPreviousClose;
+    // Chart-Meta hat kein previousClose → nutze spark-Quote für korrekte Tagesänderung
+    const price = quote?.regularMarketPrice ?? meta.regularMarketPrice;
+    const prev = quote?.regularMarketPreviousClose ?? meta.previousClose ?? meta.chartPreviousClose;
     const chg = price - prev;
     const chgPct = chg / prev;
     const cls = chg >= 0 ? "up" : "down";
@@ -229,8 +237,8 @@
     $("ticker-metrics").innerHTML = `
       <div class="metric-cell"><span class="k">Periode Hoch</span><span class="v">$${fmt(high)}</span></div>
       <div class="metric-cell"><span class="k">Periode Tief</span><span class="v">$${fmt(low)}</span></div>
-      <div class="metric-cell"><span class="k">52W Hoch</span><span class="v">$${fmt(meta.fiftyTwoWeekHigh)}</span></div>
-      <div class="metric-cell"><span class="k">52W Tief</span><span class="v">$${fmt(meta.fiftyTwoWeekLow)}</span></div>
+      <div class="metric-cell"><span class="k">52W Hoch</span><span class="v">$${fmt(quote?.fiftyTwoWeekHigh ?? meta.fiftyTwoWeekHigh)}</span></div>
+      <div class="metric-cell"><span class="k">52W Tief</span><span class="v">$${fmt(quote?.fiftyTwoWeekLow ?? meta.fiftyTwoWeekLow)}</span></div>
       <div class="metric-cell"><span class="k">Volumen</span><span class="v">${vol ? vol.toLocaleString("de-DE") : "—"}</span></div>
       <div class="metric-cell"><span class="k">HV (annualisiert)</span><span class="v">${fmtPct(hv)}</span></div>
       <div class="metric-cell"><span class="k">RSI (14)</span><span class="v">${rsi == null ? "—" : rsi.toFixed(1)} <span class="rsi-badge ${rsiCls}">${rsiLabel}</span></span></div>
@@ -249,14 +257,20 @@
     try {
       const fetchRange = RANGE_FETCH[state.range] || state.range;
       const interval = state.range === "5d" ? "30m" : "1d";
-      const { meta, points: fullPoints } = await API.getChart(state.ticker, fetchRange, interval);
+      // Chart + Quote parallel — Quote liefert korrekten previousClose (Tagesänderung)
+      const [chartData, quotes] = await Promise.all([
+        API.getChart(state.ticker, fetchRange, interval),
+        API.getQuotes([state.ticker]).catch(() => []),
+      ]);
+      const { meta, points: fullPoints } = chartData;
+      const quote = quotes[0];
       // Falls User in der Zwischenzeit gewechselt hat → verwerfen
       if (state.ticker !== tickerAtStart || state.range !== rangeAtStart) return;
-      const { points, pre, fullCloses } = computeIndicatorsSliced(fullPoints, RANGE_DISPLAY_COUNT[state.range]);
-      state.lastRender = { meta, points, pre, fullCloses };
+      const { points, pre, fullCloses } = computeIndicatorsSliced(fullPoints, RANGE_DISPLAY_DAYS[state.range]);
+      state.lastRender = { meta, points, pre, fullCloses, quote };
       CHARTS.render("price-chart", points, state.ticker, state.indicators, pre);
-      updateChartHeaderAndMetrics(meta, points, pre, fullCloses);
-      saveCachedChart(state.ticker, state.range, meta, points, pre, fullCloses);
+      updateChartHeaderAndMetrics(meta, points, pre, fullCloses, quote);
+      saveCachedChart(state.ticker, state.range, meta, points, pre, fullCloses, quote);
       setStamp("chart-stamp", false);
     } catch (e) {
       console.warn("Chart error", e);
