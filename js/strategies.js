@@ -29,6 +29,7 @@
       strike: K, premium: premiumDollar, maxRisk: maxLoss,
       dte, pop, annRet, score, iv: sigma,
       expirationDate: put.expiration,
+      underlying: S, premiumPerShare: premium,
     };
   }
 
@@ -51,6 +52,7 @@
       strike: K, premium: premiumDollar, maxRisk: cost - premiumDollar,
       dte, pop, annRet, score, iv: sigma,
       expirationDate: call.expiration,
+      underlying: S, premiumPerShare: premium,
     };
   }
 
@@ -85,6 +87,7 @@
             strike: shortLeg.strike, premium: creditDollar, maxRisk: maxLoss,
             dte, pop, annRet, score, iv: sigma,
             expirationDate: shortLeg.expiration,
+            underlying: S, longStrike: longLeg.strike, premiumPerShare: credit,
           };
         }
       }
@@ -101,7 +104,8 @@
     const T = dte / 365;
     const sigma = call.impliedVolatility || 0.3;
     const breakeven = K + premium;
-    const popBreakeven = 1 - BS.probITM("call", S, breakeven, T, r, sigma);
+    // Gewinn bei Long Call wenn ST > Break-Even → POP = P(ST > BE) = probITM("call", BE)
+    const popBreakeven = BS.probITM("call", S, breakeven, T, r, sigma);
     const targetMove = breakeven * 1.05;
     const targetProfit = (targetMove - breakeven) * 100;
     const retPct = targetProfit / cost;
@@ -113,6 +117,7 @@
       strike: K, premium: -cost, maxRisk: cost,
       dte, pop: popBreakeven, annRet, score, iv: sigma,
       expirationDate: call.expiration,
+      underlying: S, premiumPerShare: premium,
     };
   }
 

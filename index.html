@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>S&P 500 Options Analyzer</title>
-  <link rel="stylesheet" href="css/styles.css?v=9" />
+  <link rel="stylesheet" href="css/styles.css?v=10" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 </head>
@@ -130,18 +130,37 @@
 
   </main>
 
+  <div id="payoff-overlay" class="payoff-overlay" hidden>
+    <div class="payoff-modal" role="dialog" aria-modal="true">
+      <div class="payoff-head">
+        <div>
+          <h2 id="payoff-title">—</h2>
+          <div class="payoff-sub" id="payoff-sub">—</div>
+        </div>
+        <button id="payoff-close" class="btn small" aria-label="Schließen">✕</button>
+      </div>
+      <canvas id="payoff-chart"></canvas>
+      <div class="payoff-metrics" id="payoff-metrics"></div>
+      <div class="payoff-explain" id="payoff-explain"></div>
+      <div class="payoff-actions">
+        <button id="payoff-load-chart" class="btn small">Im Hauptchart öffnen</button>
+        <span class="payoff-disclaimer">Modellwerte bei Verfall, ohne Gebühren. Keine Anlageberatung.</span>
+      </div>
+    </div>
+  </div>
+
   <footer class="footer">
     <span>Daten: Yahoo Finance (inoffiziell) • News: RSS • Open Source</span>
     <a href="https://github.com/MattStad/SP500Checker" id="repo-link">GitHub</a>
   </footer>
 
-  <script src="js/config.js?v=9"></script>
-  <script src="js/api.js?v=9"></script>
-  <script src="js/indicators.js?v=9"></script>
-  <script src="js/blackscholes.js?v=9"></script>
-  <script src="js/strategies.js?v=9"></script>
-  <script src="js/charts.js?v=9"></script>
-  <script src="js/news.js?v=9"></script>
-  <script src="js/app.js?v=9"></script>
+  <script src="js/config.js?v=10"></script>
+  <script src="js/api.js?v=10"></script>
+  <script src="js/indicators.js?v=10"></script>
+  <script src="js/blackscholes.js?v=10"></script>
+  <script src="js/strategies.js?v=10"></script>
+  <script src="js/charts.js?v=10"></script>
+  <script src="js/news.js?v=10"></script>
+  <script src="js/app.js?v=10"></script>
 </body>
 </html>

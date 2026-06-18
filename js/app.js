@@ -23,6 +23,7 @@
     lastRender: null,
     lastMovers: [],
     lastQuotes: [],
+    scanDisplayed: [],
   };
 
   const $ = (id) => document.getElementById(id);
@@ -353,10 +354,10 @@
     loadChart();
   }
 
-  function renderScanRow(r) {
+  function renderScanRow(r, idx) {
     const expDate = new Date(r.expirationDate * 1000).toLocaleDateString("de-DE");
     const premiumStr = r.strategy === "lc" ? `-$${fmt(Math.abs(r.premium))}` : `$${fmt(r.premium)}`;
-    return `<tr>
+    return `<tr data-idx="${idx}" title="Klicken für Payoff-Diagramm">
       <td><strong>${r.ticker}</strong></td>
       <td><span class="strat-tag ${r.strategy}">${r.strategyLabel}</span></td>
       <td>${r.setup}</td>
@@ -396,10 +397,12 @@
       if (results.length) {
         status.className = "scan-status";
         status.textContent = `${results.length} Vorschläge (${ok}/${total} Ticker OK${errCount ? `, ${errCount} Fehler` : ""}). Nächster Auto-Scan in 15 Min.`;
+        state.scanDisplayed = results;
         body.innerHTML = results.map(renderScanRow).join("");
       } else if (fallback.length) {
         status.className = "scan-status";
         status.textContent = `Keine Treffer mit Filter (Min-POP ${(minPop*100).toFixed(0)}%) — zeige Top ${fallback.length} unter dem Filter. ${ok}/${total} OK${errCount ? `, ${errCount} Fehler` : ""}.`;
+        state.scanDisplayed = fallback;
         body.innerHTML = fallback.map(renderScanRow).join("");
       } else if (ok === 0 && errCount > 0) {
         status.className = "scan-status error";
@@ -422,8 +425,134 @@
     }
   }
 
+  // ---- Payoff-Diagramm (Gewinn/Verlust bei Verfall) ----
+  let payoffChart = null;
+
+  function payoffAt(r, ST) {
+    const prem = r.premium;            // Dollar-Betrag (negativ bei Long Call)
+    const K = r.strike;
+    switch (r.strategy) {
+      case "csp": // Short Put + Cash
+        return prem - 100 * Math.max(0, K - ST);
+      case "cc":  // 100 Aktien + Short Call
+        return 100 * (Math.min(ST, K) - r.underlying) + prem;
+      case "bps": // Short Put K + Long Put longStrike
+        return prem - 100 * Math.max(0, K - ST) + 100 * Math.max(0, r.longStrike - ST);
+      case "lc":  // Long Call (prem ist negativ = Kosten)
+        return 100 * Math.max(0, ST - K) + prem;
+      default: return 0;
+    }
+  }
+
+  function breakeven(r) {
+    const pps = r.premiumPerShare;
+    switch (r.strategy) {
+      case "csp": return r.strike - pps;
+      case "cc":  return r.underlying - pps;
+      case "bps": return r.strike - pps;
+      case "lc":  return r.strike + pps;
+      default: return r.underlying;
+    }
+  }
+
+  const EXPLAIN = {
+    csp: (r) => `<strong>Cash-Secured Put:</strong> Du verkaufst einen Put zum Strike $${fmt(r.strike)} und hinterlegst $${fmt(r.strike*100)} Cash. Du kassierst $${fmt(r.premium)} Prämie. Bleibt der Kurs über $${fmt(r.strike)}, behältst du die Prämie. Fällt er darunter, kaufst du 100 Aktien zu $${fmt(r.strike)} (effektiv ab $${fmt(breakeven(r))} Break-Even). <strong>Bullish/neutral.</strong>`,
+    cc:  (r) => `<strong>Covered Call:</strong> Du besitzt 100 Aktien (Kauf bei $${fmt(r.underlying)}) und verkaufst einen Call zum Strike $${fmt(r.strike)} für $${fmt(r.premium)}. Maximaler Gewinn, wenn der Kurs bis $${fmt(r.strike)} steigt; darüber wird verkauft. Schützt leicht nach unten (Break-Even $${fmt(breakeven(r))}). <strong>Neutral/leicht bullish, Income.</strong>`,
+    bps: (r) => `<strong>Bull Put Spread:</strong> Verkaufe Put $${fmt(r.strike)}, kaufe Put $${fmt(r.longStrike)} zur Absicherung. Netto-Kredit $${fmt(r.premium)}. Maximaler Verlust gedeckelt auf $${fmt(r.maxRisk)}. Gewinn, solange der Kurs über $${fmt(breakeven(r))} bleibt. <strong>Bullish mit definiertem Risiko.</strong>`,
+    lc:  (r) => `<strong>Long Call:</strong> Du kaufst einen Call zum Strike $${fmt(r.strike)} für $${fmt(Math.abs(r.premium))}. Verlust auf die Prämie begrenzt, Gewinn ab $${fmt(breakeven(r))} unbegrenzt nach oben. <strong>Stark bullish, Spekulation.</strong>`,
+  };
+
+  function openPayoff(r) {
+    const S = r.underlying;
+    const be = breakeven(r);
+    const lo = Math.min(S * 0.75, r.strike * 0.9, (r.longStrike || S) * 0.9);
+    const hi = Math.max(S * 1.25, r.strike * 1.1);
+    const N = 90;
+    const xs = [], ys = [];
+    for (let i = 0; i <= N; i++) {
+      const ST = lo + (hi - lo) * (i / N);
+      xs.push(ST); ys.push(payoffAt(r, ST));
+    }
+    const maxProfit = Math.max(...ys), maxLoss = Math.min(...ys);
+
+    $("payoff-title").textContent = `${r.ticker} · ${r.strategyLabel}`;
+    $("payoff-sub").textContent = `${r.setup} · Verfall ${new Date(r.expirationDate*1000).toLocaleDateString("de-DE")} (${r.dte} Tage)`;
+
+    const profitCap = r.strategy === "lc" ? "unbegrenzt" : `$${fmt(maxProfit)}`;
+    $("payoff-metrics").innerHTML = `
+      <div class="metric-cell"><span class="k">Max Gewinn</span><span class="v up">${profitCap}</span></div>
+      <div class="metric-cell"><span class="k">Max Verlust</span><span class="v down">$${fmt(Math.abs(maxLoss))}</span></div>
+      <div class="metric-cell"><span class="k">Break-Even</span><span class="v">$${fmt(be)}</span></div>
+      <div class="metric-cell"><span class="k">Akt. Kurs</span><span class="v">$${fmt(S)}</span></div>
+      <div class="metric-cell"><span class="k">POP</span><span class="v">${(r.pop*100).toFixed(1)}%</span></div>
+      <div class="metric-cell"><span class="k">Ann. Rendite</span><span class="v">${(r.annRet*100).toFixed(1)}%</span></div>
+    `;
+    $("payoff-explain").innerHTML = (EXPLAIN[r.strategy] || (() => ""))(r);
+
+    drawPayoffChart(xs, ys, S, be, r);
+
+    const overlay = $("payoff-overlay");
+    overlay.hidden = false;
+    state.payoffTicker = r.ticker;
+  }
+
+  function drawPayoffChart(xs, ys, S, be, r) {
+    const ctx = document.getElementById("payoff-chart").getContext("2d");
+    if (payoffChart) payoffChart.destroy();
+    const zeroLine = xs.map(() => 0);
+    payoffChart = new Chart(ctx, {
+      data: {
+        labels: xs.map(x => "$" + Math.round(x)),
+        datasets: [
+          {
+            type: "line", label: "Gewinn/Verlust", data: ys,
+            borderColor: "#60a5fa", borderWidth: 2, pointRadius: 0, tension: 0.05,
+            segment: { borderColor: (c) => (c.p0.parsed.y >= 0 && c.p1.parsed.y >= 0) ? "#22c55e" : "#ef4444" },
+            fill: { target: { value: 0 }, above: "rgba(34,197,94,0.12)", below: "rgba(239,68,68,0.12)" },
+            order: 2,
+          },
+          { type: "line", label: "Null", data: zeroLine, borderColor: "rgba(138,152,179,0.5)", borderWidth: 1, borderDash: [4,4], pointRadius: 0, order: 1 },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: { duration: 200 },
+        interaction: { mode: "index", intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: "#131b2a", borderColor: "#243049", borderWidth: 1,
+            titleColor: "#e5ecf6", bodyColor: "#e5ecf6",
+            callbacks: {
+              title: (items) => `Kurs bei Verfall: ${items[0].label}`,
+              label: (c) => c.dataset.label === "Null" ? null : `G/V: ${c.parsed.y >= 0 ? "+" : ""}$${fmt(c.parsed.y)}`,
+            },
+          },
+        },
+        scales: {
+          x: { ticks: { color: "#8a98b3", maxTicksLimit: 8 }, grid: { color: "rgba(36,48,73,0.4)" }, title: { display: true, text: "Kurs bei Verfall", color: "#8a98b3" } },
+          y: { ticks: { color: "#8a98b3", callback: (v) => `$${v}` }, grid: { color: "rgba(36,48,73,0.4)" }, title: { display: true, text: "Gewinn / Verlust", color: "#8a98b3" } },
+        },
+      },
+    });
+  }
+
+  function closePayoff() {
+    $("payoff-overlay").hidden = true;
+    if (payoffChart) { payoffChart.destroy(); payoffChart = null; }
+  }
+
   function bindUi() {
     $("refresh-btn").addEventListener("click", () => refreshAll(false));
+    $("strategies-body").addEventListener("click", (e) => {
+      const tr = e.target.closest("tr[data-idx]");
+      if (!tr) return;
+      const r = state.scanDisplayed[parseInt(tr.dataset.idx, 10)];
+      if (r) openPayoff(r);
+    });
+    $("payoff-close").addEventListener("click", closePayoff);
+    $("payoff-overlay").addEventListener("click", (e) => { if (e.target.id === "payoff-overlay") closePayoff(); });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePayoff(); });
+    $("payoff-load-chart").addEventListener("click", () => { if (state.payoffTicker) { selectTicker(state.payoffTicker); closePayoff(); } });
     $("load-ticker-btn").addEventListener("click", () => {
       const v = $("ticker-input").value.trim();
       if (v) selectTicker(v);
