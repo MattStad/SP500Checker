@@ -28,7 +28,9 @@ window.CFG = {
     "MA","UNH","XOM","JNJ","WMT","PG","HD","COST","BAC","ABBV",
     "ORCL","CRM","AMD","NFLX","ADBE","KO","PEP","MCD","DIS","CSCO",
     "INTC","T","VZ","CVX","WFC","NKE","BA","GE","CAT","GS",
-    "MS","C","PFE","MRK","TGT","LOW","QCOM","AVGO","IBM","SPY"
+    "MS","C","PFE","MRK","TGT","LOW","QCOM","AVGO","IBM","SPY",
+    "QQQ","GOOG","LLY","AMGN","GILD","HON","RTX","UNP","UPS","LMT",
+    "DE","BKNG","MU","UBER","TMO","ABT","TXN","INTU","NOW","PYPL"
   ],
   RSS_FEEDS: [
     { name: "Yahoo S&P500", url: "https://feeds.finance.yahoo.com/rss/2.0/headline?s=^GSPC&region=US&lang=en-US" },
@@ -51,7 +53,11 @@ window.CFG = {
     INTC:"Intel", T:"AT&T", VZ:"Verizon", CVX:"Chevron", WFC:"Wells Fargo",
     NKE:"Nike", BA:"Boeing", GE:"GE Aerospace", CAT:"Caterpillar", GS:"Goldman Sachs",
     MS:"Morgan Stanley", C:"Citigroup", PFE:"Pfizer", MRK:"Merck", TGT:"Target",
-    LOW:"Lowe's", QCOM:"Qualcomm", AVGO:"Broadcom", IBM:"IBM", SPY:"S&P 500 ETF"
+    LOW:"Lowe's", QCOM:"Qualcomm", AVGO:"Broadcom", IBM:"IBM", SPY:"S&P 500 ETF",
+    QQQ:"Nasdaq 100 ETF", GOOG:"Alphabet C", LLY:"Eli Lilly", AMGN:"Amgen", GILD:"Gilead",
+    HON:"Honeywell", RTX:"RTX Corp", UNP:"Union Pacific", UPS:"UPS", LMT:"Lockheed M.",
+    DE:"Deere", BKNG:"Booking", MU:"Micron", UBER:"Uber", TMO:"Thermo Fisher",
+    ABT:"Abbott", TXN:"Texas Instr.", INTU:"Intuit", NOW:"ServiceNow", PYPL:"PayPal"
   },
   DEFAULT_TICKER: "SPY",
   QUOTE_CHUNK_SIZE: 10,

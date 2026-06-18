@@ -387,7 +387,7 @@
     const strategies = sel === "all" ? ["csp", "cc", "bps", "lc"] : [sel];
 
     try {
-      const tickers = CFG.SCAN_TICKERS.slice(0, 18);
+      const tickers = CFG.SCAN_TICKERS; // alle Ticker scannen
       const { results, fallback, errors, ok, total } = await STRAT.scan({
         tickers, strategies, minPop, maxDte,
         onProgress: (i, n, t) => { status.textContent = `Scanne ${i}/${n}: ${t}`; },
