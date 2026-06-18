@@ -42,7 +42,9 @@
     const upside = (K - S) * 100 + premiumDollar;
     const T = dte / 365;
     const sigma = call.impliedVolatility || 0.3;
-    const pop = 1 - BS.probITM("call", S, K, T, r, sigma);
+    // Echte Gewinnwahrscheinlichkeit: Kurs bleibt über Break-Even (Einstand − Prämie)
+    const breakeven = S - premium;
+    const pop = BS.probITM("call", S, breakeven, T, r, sigma);
     const retPct = upside / cost;
     const annRet = annualize(retPct, dte);
     const score = annRet * pop;
@@ -106,11 +108,14 @@
     const breakeven = K + premium;
     // Gewinn bei Long Call wenn ST > Break-Even → POP = P(ST > BE) = probITM("call", BE)
     const popBreakeven = BS.probITM("call", S, breakeven, T, r, sigma);
-    const targetMove = breakeven * 1.05;
-    const targetProfit = (targetMove - breakeven) * 100;
+    // Realistisches Kursziel: +1 Standardabweichung (IV-skaliert über die Laufzeit).
+    // Weit-OTM-Lottoscheine erreichen das Ziel nicht → negativer Ertrag → Score 0.
+    const oneSigma = S * sigma * Math.sqrt(T);
+    const targetPrice = S + oneSigma;
+    const targetProfit = Math.max(0, targetPrice - K) * 100 - cost;
     const retPct = targetProfit / cost;
     const annRet = annualize(retPct, dte);
-    const score = annRet * popBreakeven * 0.6;
+    const score = Math.max(0, annRet) * popBreakeven * 0.6;
     return {
       ticker, strategy: "lc", strategyLabel: "Long Call",
       setup: `Kaufe ${K}C @ ${premium.toFixed(2)} • BE ${breakeven.toFixed(2)}`,
